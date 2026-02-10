@@ -28,12 +28,12 @@ import lps_ml.datasets as ml_db
 import lps_ml.utils.general as ml_utils
 import lps_ml.datasets.iara as ml_iara
 # Teste rapidamente quais funções estão disponíveis:
-import lps_sp.signal as lps_signal
+#import lps_sp.signal as lps_signal
 #print(dir(lps_signal))  # Veja todas as funções disponíveis
 from torch import nn
 
-from iara.ml.metrics import Metric, GridCompiler
-
+#from iara.ml.metrics import Metric, GridCompiler
+from lps_ml.utils.metrics import Metric
 
 import logging
 
@@ -110,6 +110,7 @@ def _main():
 
 
     #Adicao de logging para retirar debugs
+    #debugs estao presents em time_processors.py e loader.py
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(
@@ -134,7 +135,7 @@ def _main():
                     #pipelines=ml_procs.CPADetector(duration, duration * 60)
                     pipelines = ml_procs.CPADetector(
                         duration,
-                        lps_qty.Time.s(duration.value * 60)
+                        lps_qty.Time.s(duration.get_s() * 60)
 
 
                     )
@@ -165,7 +166,7 @@ def _main():
                 overlap=overlap,
                 pipelines=ml_procs.CPADetector(
                 duration,
-                    lps_qty.Time.s(duration.value * 60)
+                    lps_qty.Time.s(duration.get_s() * 60)
                 )
             ),
             cv=ml_cv.FiveByTwo(),
