@@ -146,7 +146,8 @@ class ShipLengthClassifier(enum.Enum):
                 target = ml_sel.CallbackTarget(
                         n_targets = 4,
                         function = lambda df: ShipLengthClassifier.classify(df[colunm_id]).value))
-
+    
+    
 class CargoShipClassifier(enum.Enum):
     """ Enum defining modes for selecting ships for classification tasks. """
     IDENTIFIED = 0
@@ -265,11 +266,29 @@ class IARA(ml_core.AudioDataModule):
                 extract_id=lambda filename: int(filename.rsplit('-', maxsplit=1)[-1]))
 
 
+    @staticmethod
+    def ship_category_selector(column_id: str = "SHIPTYPE") -> ml_sel.Selector:
+        def classify(row: pd.Series) -> int | None:
+            # 'row' é uma Series (uma linha do DataFrame)
+            ship_type = row[column_id]
+            return ShipCategory.classify(ship_type)
+
+        return ml_sel.Selector(
+            target=ml_sel.CallbackTarget(
+                n_targets=2,
+                function=classify
+            )
+        )
+
+
+
+
+
     def __init__(self,
                  file_processor: ml_core.AudioProcessor,
                  data_collection: DC = DC.OS,
-                 processed_dir: str = "/data/Processed_data/IARA",
-                 data_dir: str = "/data/IARA",
+                 processed_dir: str = "/data/Processed_data/IARA_Vitoria",
+                 data_dir="C:/Users/carol/Documents/Sonat/IARA/src/data/raw/train",
                  batch_size: int = 32,
                  cv: ml_core.CrossValidator = None,
                  selection: ml_sel.Selector = None,
@@ -285,3 +304,35 @@ class IARA(ml_core.AudioDataModule):
                          batch_size = batch_size,
                          num_workers = num_workers,
                          cv = cv)
+
+#Criacao de classe para novo seletor
+class ShipCategory(enum.Enum):
+    CARGUEIRO = 0
+    APOIO = 1
+
+    @staticmethod
+    def classify(ship_type: str) -> int | None:
+        cargueiro = {
+            "Bulker",
+            "Vehicle_Carrier",
+            "Containership",
+            "Tanker"
+        }
+
+        apoio = {
+            "Fishing",
+            "Recreational",
+            "Tug",
+            "Dredger"
+        }
+
+        if ship_type in cargueiro:
+            return ShipCategory.CARGUEIRO.value
+        if ship_type in apoio:
+            return ShipCategory.APOIO.value
+
+        # Importante: None → linha descartada pelo Selector
+        return None
+
+
+   
