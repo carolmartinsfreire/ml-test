@@ -26,6 +26,9 @@ dataloader = DataLoader(dataset, batch_size=5)
 # -----------------------------
 # 3. Avaliação manual (como você já fez)
 # -----------------------------
+
+#### Computar lista de metricas
+Fazer chamada de funcoes estaticas que foram realocadas para metricas
 targets = []
 preds = []
 
