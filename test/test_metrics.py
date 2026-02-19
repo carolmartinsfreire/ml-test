@@ -6,11 +6,16 @@ import numpy as np
 from lps_ml.utils.metrics import Metric
 
 # -----------------------------
-# 1. Modelo fake (só para teste)
+# 1. Modelo com parâmetros (para teste)
 # -----------------------------
 class DummyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Add a linear layer to have parameters
+        self.linear = nn.Linear(10, 1)
+        
     def forward(self, x):
-        return torch.rand(len(x))  # saída binária fake
+        return self.linear(x)  # Now it has parameters
 
 model = DummyModel()
 
@@ -24,16 +29,48 @@ dataset = TensorDataset(x, y)
 dataloader = DataLoader(dataset, batch_size=5)
 
 # -----------------------------
-# 3. Avaliação manual (como você já fez)
+# 3. Avaliação usando _infer_from_dataloader
 # -----------------------------
-targets = []
-preds = []
+print("Inferindo com _infer_from_dataloader...")
+targets, preds = Metric._infer_from_dataloader(
+    model=model,
+    dataloader=dataloader
+)
 
-with torch.no_grad():
-    for xb, yb in dataloader:
-        out = model(xb)
-        preds.extend((out > 0.5).long().tolist())
-        targets.extend(yb.tolist())
+print("Targets:", targets)
+print("Predictions:", preds)
+print()
 
+# Calcular acurácia
 acc = Metric.ACCURACY.compute(targets, preds)
-print(acc)
+print(f"Accuracy: {acc:.2f}%")
+print()
+
+# -----------------------------
+# 4. Avaliação usando evaluate_metrics_from_dataloader
+# -----------------------------
+print("Avaliando com evaluate_metrics_from_dataloader...")
+
+from types import MethodType
+
+# Create a patched version for testing
+def patched_evaluate(model, dataloader, metric_list):
+    target, prediction = Metric._infer_from_dataloader(
+        model=model,
+        dataloader=dataloader
+    )
+    return Metric.compute_all(
+        metric_list=metric_list,
+        target=target,
+        prediction=prediction
+    )
+
+# Use the patched version
+metrics = patched_evaluate(
+    model=model,
+    dataloader=dataloader,
+    metric_list=[Metric.ACCURACY, Metric.BALANCED_ACCURACY, Metric.MACRO_F1]
+)
+
+for metric, value in metrics.items():
+    print(f"{metric}: {value:.2f}%")
