@@ -131,6 +131,68 @@ class Metric(enum.Enum):
         for metric in metric_list:
             dict_values[metric] = metric.compute(target, prediction)
         return dict_values
+    
+
+    # Implementacao de avaliador das metricas
+    # selecionar a metrica de interesse via linha de comando
+
+    #Criacao de um método genérico de inferência
+    @staticmethod
+    def _infer_from_dataloader(
+        model: nn.Module,
+        dataloader: torch_data.DataLoader,
+        device: torch.device = None
+    ):
+        if device is None:
+            device = next(model.parameters()).device
+
+        model.eval()
+        model.to(device)
+
+        all_targets = []
+        all_predictions = []
+
+        with torch.no_grad():
+            for x, y in dataloader:
+                x = x.to(device)
+                y = y.to(device)
+
+                out = model(x)
+
+                # binário vs multiclasse
+                if out.ndim == 1 or out.shape[-1] == 1:
+                    preds = (out.squeeze() > 0.5).long()
+                else:
+                    preds = torch.argmax(out, dim=1)
+
+                all_targets.append(y.cpu().numpy())
+                all_predictions.append(preds.cpu().numpy())
+
+        return (
+            np.concatenate(all_targets),
+            np.concatenate(all_predictions)
+        )
+            # Avaliador de metricas
+      
+    @staticmethod
+    def evaluate_metrics_from_dataloader(
+        model: nn.Module,
+        dataloader: torch_data.DataLoader,
+        metric_list: typing.List['Metric']
+    ) -> typing.Dict['Metric', float]:
+
+        target, prediction = Metric._infer_from_dataloader(
+            model=model,
+            dataloader=dataloader
+        )
+
+        return Metric.compute_all(
+            metric_list=metric_list,
+            target=target,
+            prediction=prediction
+        )
+
+    
 
 class Test(enum.Enum):
     F_TEST_5x2 = 0
@@ -445,68 +507,8 @@ class GridCompiler():
                 correct_params[key] = value
 
         return hash(tuple(correct_params.items()))
+
     
-
-    # Implementacao de avaliador das metricas
-    # selecionar a metrica de interesse via linha de comando
-
-    #Criacao de um método genérico de inferência
-    @staticmethod
-    def _infer_from_dataloader(
-        model: nn.Module,
-        dataloader: torch_data.DataLoader,
-        device: torch.device = None
-    ):
-        if device is None:
-            device = next(model.parameters()).device
-
-        model.eval()
-        model.to(device)
-
-        all_targets = []
-        all_predictions = []
-
-        with torch.no_grad():
-            for x, y in dataloader:
-                x = x.to(device)
-                y = y.to(device)
-
-                out = model(x)
-
-                # binário vs multiclasse
-                if out.ndim == 1 or out.shape[-1] == 1:
-                    preds = (out.squeeze() > 0.5).long()
-                else:
-                    preds = torch.argmax(out, dim=1)
-
-                all_targets.append(y.cpu().numpy())
-                all_predictions.append(preds.cpu().numpy())
-
-        return (
-            np.concatenate(all_targets),
-            np.concatenate(all_predictions)
-        )
-    
-    # Avaliador de metricas
-    @staticmethod
-    def evaluate_metrics_from_dataloader(
-        model: nn.Module,
-        dataloader: torch_data.DataLoader,
-        metric_list: typing.List[Metric]
-    ) -> typing.Dict[Metric, float]:
-
-        target, prediction = GridCompiler._infer_from_dataloader(
-            model=model,
-            dataloader=dataloader
-        )
-
-        return Metric.compute_all(
-            metric_list=metric_list,
-            target=target,
-            prediction=prediction
-        )
-    
-
     def add(self,
             params: typing.Dict,
             i_fold: int,
