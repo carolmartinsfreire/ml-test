@@ -37,14 +37,6 @@ targets, preds = Metric._infer_from_dataloader(
     dataloader=dataloader
 )
 
-print("Targets:", targets)
-print("Predictions:", preds)
-print()
-
-# Calcular acurácia
-acc = Metric.ACCURACY.compute(targets, preds)
-print(f"Accuracy: {acc:.2f}%")
-print()
 
 # -----------------------------
 # 4. Avaliação usando evaluate_metrics_from_dataloader
