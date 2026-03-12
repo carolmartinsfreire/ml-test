@@ -28,12 +28,14 @@ import lps_ml.datasets as ml_db
 import lps_ml.utils.general as ml_utils
 import lps_ml.datasets.iara as ml_iara
 # Teste rapidamente quais funções estão disponíveis:
-#import lps_sp.signal as lps_signal
+import lps_sp.signal as lps_signal
 #print(dir(lps_signal))  # Veja todas as funções disponíveis
 from torch import nn
 
 #from iara.ml.metrics import Metric, GridCompiler
 from lps_ml.utils.metrics import Metric
+
+#from lps_sp.signal import SpectralAnalysis, Parameters
 
 import logging
 
@@ -125,6 +127,8 @@ def _main():
     duration=lps_qty.Time.s(1)
     overlap=lps_qty.Time.s(0.75)
 
+
+    #TimeProcessor
     dm = ml_db.IARA(
             #o WAV vira tensor, totalmente independente da classe.
 
