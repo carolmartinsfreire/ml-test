@@ -50,3 +50,15 @@ This library depends on:
 ## License
 
 This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA) license. You are free to use, modify, and distribute the code for non-commercial purposes, with the condition that you provide attribution to the authors and distribute any derivative works under the same license. For more details, please refer to the license file (LICENSE.md) included in this repository.
+
+## Implementations Added
+
+ O arquivo test_iara_frequency e o frequency_processor estao com muitos comentarios, maioria de coisas que tenho que fazer/ajustar
+ O codigo de teste tem um uso simples:
+
+```bash
+ .\test\test_iara_frequency.py  --metrics all
+ ```
+ Ou se seleciona a metrica que se quer obter
+ Se criou uma classe para separar em cargueiro e apoio no final do codigo iara.py
+ Assim que se roda o codigo aparece um Dataset description , onde fica claro que com a adicao dessa classe, se consegue mais dados para treino e validacao
