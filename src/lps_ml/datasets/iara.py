@@ -146,7 +146,7 @@ class ShipLengthClassifier(enum.Enum):
                 target = ml_sel.CallbackTarget(
                         n_targets = 4,
                         function = lambda df: ShipLengthClassifier.classify(df[colunm_id]).value))
-    
+    # implementar uma funcao para reduzir t processamento
     
 class CargoShipClassifier(enum.Enum):
     """ Enum defining modes for selecting ships for classification tasks. """
@@ -291,7 +291,7 @@ class IARA(ml_core.AudioDataModule):
                  data_dir="C:/Users/carol/Documents/Sonat/IARA/src/data/raw/train",
                  batch_size: int = 32,
                  cv: ml_core.CrossValidator = None,
-                 selection: ml_sel.Selector = None,
+                 #selection: ml_sel.Selector = None,
                  num_workers: int = None):
 
         df = data_collection.to_df()
