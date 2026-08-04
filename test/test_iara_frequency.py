@@ -84,6 +84,54 @@ def evaluate_from_dataloader(
 
 
 
+#A funcao abaixo passa arrays para a CrossValidationCompiler em metrics.py
+#Calculo de metricas agregadas
+#INICIO DE MUDANCAS
+#desativa mecanismo de calculo de gradientes do pyTorch reduz consumo de RAM
+@torch.no_grad()
+#recebe modelo e carregadados, retorna duas lists
+def get_predictions_from_dataloader(
+    model: nn.Module,
+    dataloader: torch_data.DataLoader,
+    device: torch.device | None = None,
+    ) -> tuple[list[int], list[int]]:
+    # GPU ou CPU
+    if device is None:
+        device = next(model.parameters()).device
+    #fixa batch para avaliacao
+    model.eval()
+    #envia pra GPU ou CPU
+    model.to(device)
+
+    y_true = []
+    y_pred = []
+
+    for x, y in dataloader:
+        x = x.to(device)
+        y = y.to(device)
+	
+	#probabilidades saida bruta
+        out = model(x)
+
+	#pos processamento
+	#modelo binario
+        if out.ndim == 1 or out.shape[-1] == 1:
+            preds = (out.squeeze() > 0.5).long()
+	#modelo multiclasse
+        else:
+            preds = torch.argmax(out, dim=1)
+
+	#transforma y e preds da GPU para numpy na CPU e agrega
+        y_true.extend(y.cpu().numpy())
+        y_pred.extend(preds.cpu().numpy())
+
+    return y_true, y_pred
+
+
+
+
+
+
 def _main():
     """Main function for the dataset info tables."""
 
@@ -108,12 +156,7 @@ def _main():
 
     args = parser.parse_args()
 
-
-
-
-    #Adicao de logging para retirar debugs
-    #debugs estao presents em time_processors.py e loader.py
-
+    # Adicao de logging para retirar debugs
     log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(
         level=log_level,
@@ -123,40 +166,44 @@ def _main():
     torch.set_float32_matmul_precision('medium')
     ml_utils.set_seed()
 
-    fs_out=lps_qty.Frequency.khz(16)
-    duration=lps_qty.Time.s(1)
-    overlap=lps_qty.Time.s(0.75)
+    fs_out = lps_qty.Frequency.khz(16)
+    duration = lps_qty.Time.s(1)
+    overlap = lps_qty.Time.s(0.75)
 
+   
+    # INICIALIZAÇÃO DOS COMPILADORES DE VALIDAÇÃO CRUZADA
+   
+    # Importa a classe compiladora do arquivo de métricas
+    from lps_ml.utils.metrics import CrossValidationCompiler
 
-    #TimeProcessor
-    dm = ml_db.IARA(
-        file_processor=ml_procs.FrequencyProcessor(
-            fs_out=fs_out,
-            duration=duration,
-            overlap=overlap,
-            spectral=SpectralAnalysis.LOFAR,
-            params=Parameters(),
-            pipelines=ml_procs.CPADetector(
-                duration,
-                lps_qty.Time.s(duration.get_s() * 60)
-            )
-        ),
-        cv = ml_cv.FiveByTwo(),
-        data_collection = ml_iara.DC.A,
-        selection=ml_iara.CargoShipClassifier.IDENTIFIED.as_selector(),
-        batch_size=16,
-        data_dir="C:/Users/carol/Documents/Sonat/IARA/src/data/raw/train"
-    )
-    
-    print("OLD")
-    print(ml_utils.format_header(60,"Dataset description"))
-    print(dm.to_compile_df())
-    print(ml_utils.format_header(60))
-    print()
-    print(ml_utils.format_header(60,"Training"))
+    cv_compiler_train = CrossValidationCompiler()
+    cv_compiler_val = CrossValidationCompiler()
 
+    # Definição das métricas para argparse
+    METRIC_MAP = {
+        "accuracy": Metric.ACCURACY,
+        "balanced_accuracy": Metric.BALANCED_ACCURACY,
+        "micro_f1": Metric.MICRO_F1,
+        "macro_f1": Metric.MACRO_F1,
+        "macro_recall": Metric.MACRO_RECALL,
+        "micro_recall": Metric.MICRO_RECALL,
+        "macro_precision": Metric.MACRO_PRECISION,
+        "micro_precision": Metric.MICRO_PRECISION,
+        "detection_probability": Metric.DETECTION_PROBABILITY,
+        "sp_index": Metric.SP_INDEX,
+    }
 
-    #duplicacao do experimento new selection
+    if "all" in args.metrics:
+        metrics = list(METRIC_MAP.values())
+    else:
+        metrics = []
+        for m in args.metrics:
+            key = m.lower()
+            if key not in METRIC_MAP:
+                raise ValueError(f"Métrica inválida: {m}")
+            metrics.append(METRIC_MAP[key])
+
+    # Inicialização do DataModule 
     dm = ml_db.IARA(
         file_processor=ml_procs.FrequencyProcessor(
             fs_out=fs_out,
@@ -171,145 +218,109 @@ def _main():
         ),
         cv=ml_cv.FiveByTwo(),
         data_collection=ml_iara.DC.A,
+        # criar selectio com qt predefinida
         selection=ml_iara.IARA.ship_category_selector("SHIPTYPE"),
         batch_size=16,
         data_dir="C:/Users/carol/Documents/Sonat/IARA/src/data/raw/train"
     )
 
-
     print("NEW")
-    print(ml_utils.format_header(60,"Dataset description"))
+    print(ml_utils.format_header(60, "Dataset description"))
     print(dm.to_compile_df())
     print(ml_utils.format_header(60))
     print()
-    print(ml_utils.format_header(60,"Training"))
 
-
-
-
-    model = ml_model.MLP(
-        input_shape=dm.get_sample_shape(),
-        hidden_channels=[64, 16],
-        n_targets=dm.get_n_targets(),
-        dropout=0.2,
-        lr=1e-5
-    )
-
-    checkpoint_cb = lightning_call.ModelCheckpoint(
-        monitor="val_loss",
-        save_top_k=1,
-        mode="min",
-        filename=f"iara-{{epoch:02d}}-{{val_loss:.3f}}",
-    )
-    early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
-
-    logger = lightning_log.TensorBoardLogger(
-        "logs",
-        name="iara"
-    )
-
-    trainer = lightning.Trainer(
-        max_epochs=args.max_epochs,
-        accelerator="auto",
-        # reducao de batches para treinamento mais rapido a fim de debugar o codigo (para treinar tudo, comente as duas linhas abaixo)
-        # uma mudanca sera feita em relacao ao codigo no tempo, vou colocar para passar por linha de comando os valores de limite de treinamento abaixo
-        # TODO
-        limit_train_batches=2,
-        limit_val_batches=2,
-        devices="auto",
-        logger=logger,
-        callbacks=[checkpoint_cb, early_stop_cb],
-    )
-
-    # treinamento e eval
-    trainer.fit(model, dm)
-    trainer.test(model, datamodule=dm)
-
-        # Definicao das metricas para argparse
-    METRIC_MAP = {
-    "accuracy": Metric.ACCURACY,
-    "balanced_accuracy": Metric.BALANCED_ACCURACY,
-
-    "micro_f1": Metric.MICRO_F1,
-    "macro_f1": Metric.MACRO_F1,
-
-    "macro_recall": Metric.MACRO_RECALL,
-    "micro_recall": Metric.MICRO_RECALL,
-
-    "macro_precision": Metric.MACRO_PRECISION,
-    "micro_precision": Metric.MICRO_PRECISION,
-
-    "detection_probability": Metric.DETECTION_PROBABILITY,
-    "sp_index": Metric.SP_INDEX,
-    }
-
-
-    if "all" in args.metrics:
-        metrics = list(METRIC_MAP.values())
-    else:
-        metrics = []
-        for m in args.metrics:
-            key = m.lower()
-            if key not in METRIC_MAP:
-                raise ValueError(f"Métrica inválida: {m}")
-            metrics.append(METRIC_MAP[key])
+    # 
+    #  CONFIGURAÇÃO MANUAL DOS FOLDS
     
+    dm.setup("fit")
+    num_folds = len(dm.folds)
+    print(ml_utils.format_header(60, f"Iniciando Validação Cruzada: {num_folds} Folds"))
+
     
+    # LOOP PRINCIPAL DE VALIDAÇÃO CRUZADA (Roda por todos os folds)
+    
+    for fold_idx in range(num_folds):
+        print(f"\n>>> Executando FOLD {fold_idx + 1}/{num_folds} <<<")
+        
+        # Altera os ponteiros internos para apontar os dados do fold da vez
+        dm.set_fold(fold_idx)
 
+        # Cria instancia completamente nova da MLP com pesos aleatorios *** evita que o segundo fold
+        # aproveite o primeiro
+        # RE-INICIALIZA O MODELO (Zera os pesos neurais para evitar contaminação)
+        model = ml_model.MLP(
+            input_shape=dm.get_sample_shape(),
+            hidden_channels=[64, 16],
+            n_targets=dm.get_n_targets(),
+            dropout=0.2,
+            lr=1e-5
+        )
 
-    train_metrics = evaluate_from_dataloader(
-        model,
-        dm.train_dataloader(),
-        metrics
-    )
+        # Callbacks e Loggers específicos contendo o fold_idx no nome para evitar colisões
+        checkpoint_cb = lightning_call.ModelCheckpoint(
+            monitor="val_loss",
+            save_top_k=1,
+            mode="min",
+            filename=f"iara-fold{fold_idx}-{{epoch:02d}}-{{val_loss:.3f}}",
+        )
+        early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
+        logger = lightning_log.TensorBoardLogger("logs", name=f"iara_fold_{fold_idx}")
 
-    val_metrics = evaluate_from_dataloader(
-        model,
-        dm.val_dataloader(),
-        metrics
-    )
+        # RE-INICIALIZA O TRAINER DO PYTORCH LIGHTNING
+        trainer = lightning.Trainer(
+            max_epochs=args.max_epochs,
+            accelerator="auto",
+            #limit_train_batches=2,  # Limitador de amostragem rápida para debug
+            #limit_val_batches=2,
+            devices="auto",
+            logger=logger,
+            callbacks=[checkpoint_cb, early_stop_cb],
+        )
 
-    print("Metrics enabled:")
+        # Realiza o treino apenas com a fatia alocada para este fold
+        trainer.fit(model, dm)
+
+        
+        # 4. EXTRAÇÃO DE ALVOS (Y_TRUE) E PREDIÇÕES (Y_PRED)
+        
+        # Usando o método nativo embutido na sua classe Metric para gerar arrays completos
+        y_true_train, y_pred_train = Metric._infer_from_dataloader(model, dm.train_dataloader())
+        y_true_val, y_pred_val = Metric._infer_from_dataloader(model, dm.val_dataloader())
+
+        # 
+        # ALIMENTA OS COMPILADORES COM OS DADOS EXTRAÍDOS
+        # 
+        cv_compiler_train.add(fold_idx, metrics, y_true_train, y_pred_train)
+        cv_compiler_val.add(fold_idx, metrics, y_true_val, y_pred_val)
+
+        print(f"Fold {fold_idx + 1} Concluído com Sucesso.")
+
+    # 
+    # Resultados
+    # 
+    print("\n" + ml_utils.format_header(60, "RESULTADOS CONSOLIDADOS DA VALIDAÇÃO CRUZADA"))
+    
+    print("\n[Métricas de Treino - Todos os Folds]:")
     for m in metrics:
-        print(f" - {m.name}")
-    print()
+        scores_train = cv_compiler_train.get(m)
+        print(f"{m.name:25s}: {CrossValidationCompiler.str_format(scores_train)}")
 
+    print("\n[Métricas de Validação - Todos os Folds]:")
+    for m in metrics:
+        scores_val = cv_compiler_val.get(m)
+        print(f"{m.name:25s}: {CrossValidationCompiler.str_format(scores_val)}")
 
+    
+    # MATRIZ DE CONFUSÃO ACUMULADA
+     
+    print("\n" + ml_utils.format_header(60, "Matriz de Confusão Relativa (%) - Validação"))
+    cv_compiler_val.print_cm(relative=True)
+    
     print(ml_utils.format_header(60))
-    print()
-    print(ml_utils.format_header(60, "Results (Train)"))
-    for m, v in train_metrics.items():
-        print(f"{m.name:25s}: {v:.4f}")
-
-    print()
-    print(ml_utils.format_header(60, "Results (Validation)"))
-    for m, v in val_metrics.items():
-        print(f"{m.name:25s}: {v:.4f}")
-
-    print(ml_utils.format_header(60))
-
-
-
-    #train_acc = _evaluate_accuracy(model, dm.train_dataloader())
-    #val_acc   = _evaluate_accuracy(model, dm.val_dataloader())
-    # test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
-
-    #print(ml_utils.format_header(60))
-    #print()
-    #print(f"Train accuracy:      {train_acc:.4f}")
-    #print(f"Validation accuracy: {val_acc:.4f}")
-    # print(f"Test accuracy:       {test_acc:.4f}")
-    #print(ml_utils.format_header(60, "Results (Train)"))
-    #for m, v in train_metrics.items():
-     #   print(f"{m.name:25s}: {v:.4f}")
-
-    #print()
-    #print(ml_utils.format_header(60, "Results (Validation)"))
-    #for m, v in val_metrics.items():
-     #   print(f"{m.name:25s}: {v:.4f}")
-    #print(ml_utils.format_header(60))    
 
 
 if __name__ == "__main__":
     _main()
+
 
